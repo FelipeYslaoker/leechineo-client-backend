@@ -1,0 +1,24 @@
+doctype html
+html(lang="pt-br")
+    head
+        meta(charset="UTF-8")
+        meta(http-equiv="X-UA-Compatible", content="IE=edge")
+        meta(name="viewport", content="width=device-width, initial-scale=1.0")
+        title Confirmação de email
+    body 
+        table 
+            include ../components/logo.pug
+            div 
+                p 
+                    strong Vamos validar seu e-mail?
+                    |  É rápido e prático!
+
+                p Olá 
+                    strong #{name}
+                    | , tudo bem?
+
+                p Para validar seu endereço de e-mail, clique no botão abaixo. Se você desconhece essa operação, não se preocupe, basta ignorar.
+
+                a(href=domain + "?token=" + token) Confirmar email
+
+                include ../components/footer.pug
