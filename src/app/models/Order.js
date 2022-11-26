@@ -17,13 +17,30 @@ const OrderSchema = mongoose.Schema({
         type: Number,
         required: true
     },
-    reference: {
+    transactionId: {
         type: String,
         required: true
     },
-    paymentData: {
-        type: Object,
+    paymentMethod: {
+        type: String,
+    },
+    message: {
+        type: String
+    },
+    installments: {
+        type: Number,
+        default: 1
+    },
+    trackingCode: {
+        type: String
+    },
+    paymentStatus: {
+        type: String,
         required: true
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
     }
 })
 
