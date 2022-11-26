@@ -1,36 +1,51 @@
 const Cryptr = require('cryptr')
+const getCardBrand = require('./creditCardBrand')
 
 class CryptCard {
-    constructor ({ card, user, encryptedCard }) {
+    constructor ({ card, encryptedCard, securityCode }) {
         this.card = card
-        this.user = user
         this.encryptedCard = encryptedCard
-        this.key = `${process.env.AUTH_HASH}-${user.id}`
+        this.fullCrypt = new Cryptr(`${process.env.CREDIT_CARD_KEY_HASH}${card?.securityCode || securityCode}`)
+        this.basicCrypt = new Cryptr(process.env.CREDIT_CARD_KEY_HASH)
     }
+
     get encrypted () {
-        return this.encrypt()
+        return this.#encrypt()
     }
-    get decrypted () {
-        return this.decrypt()
+    get fullDecrypted () {
+        return this.#fullDecrypt()
     }
-    encrypt () {
-        const cryptr = new Cryptr(this.key)
-        const number = cryptr.encrypt(this.card.number),
-        holderName = cryptr.encrypt(this.card.holderName),
-        expireMonth = cryptr.encrypt(this.card.expireMonth),
-        expireYear = cryptr.encrypt(this.card.expireYear),
-        card = { number, holderName, expireMonth, expireYear },
-        encryptedCard = cryptr.encrypt(JSON.stringify(card))
+    get basicDecrypted () {
+        return this.#basicDecrypt()
+    }
+
+    #encrypt () {
+        const number = this.fullCrypt.encrypt(this.card.number),
+        lastDigits = this.basicCrypt.encrypt(this.card.number.substring(15, 19)),
+        holderName = this.fullCrypt.encrypt(this.card.holderName),
+        expireMonth = this.fullCrypt.encrypt(this.card.expireMonth),
+        expireYear = this.fullCrypt.encrypt(this.card.expireYear),
+        brand = this.basicCrypt.encrypt(JSON.stringify(getCardBrand(this.card.number))),
+        card = { number, holderName, expireMonth, expireYear, lastDigits, brand },
+        encryptedCard = this.basicCrypt.encrypt(JSON.stringify(card))
         return encryptedCard
     }
-    decrypt () {
-        const cryptr = new Cryptr(this.key),
-        encryptedCard = JSON.parse(cryptr.decrypt(this.encryptedCard)),
-        number = cryptr.decrypt(encryptedCard.number),
-        holderName = cryptr.decrypt(encryptedCard.holderName),
-        expireMonth = cryptr.decrypt(encryptedCard.expireMonth),
-        expireYear = cryptr.decrypt(encryptedCard.expireYear)
+    #fullDecrypt () {
+        const encryptedCard = JSON.parse(this.basicCrypt.decrypt(this.encryptedCard.hash)),
+        number = this.fullCrypt.decrypt(encryptedCard.number),
+        holderName = this.fullCrypt.decrypt(encryptedCard.holderName),
+        expireMonth = this.fullCrypt.decrypt(encryptedCard.expireMonth),
+        expireYear = this.fullCrypt.decrypt(encryptedCard.expireYear)
         return { number, holderName, expireYear, expireMonth }
+    }
+
+    #basicDecrypt () {
+        const encryptedCard = JSON.parse(this.basicCrypt.decrypt(this.encryptedCard.hash)),
+        lastDigits = this.basicCrypt.decrypt(encryptedCard.lastDigits),
+        brand = JSON.parse(this.basicCrypt.decrypt(encryptedCard.brand))
+        return {
+            lastDigits, brand
+        }
     }
 }
 
