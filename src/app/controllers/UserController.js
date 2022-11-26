@@ -208,7 +208,13 @@ router.delete('/address/delete', auth(), async (req, res) => {
 })
 
 router.post('/store-card', auth(), async (req, res) => {
-  const creditCard = req.body.creditCard
+  const creditCard = {
+    number: req.body.creditCard.number,
+    expireMonth: req.body.creditCard.expireMonth,
+    expireYear: req.body.creditCard.expireYear,
+    holderName: req.body.creditCard.holderName,
+    securityCode: req.body.creditCard.securityCode
+  }
   try {
     if (!creditCard) {
       return res.status(400).send(errors.invalidRequest)
@@ -239,34 +245,18 @@ router.post('/store-card/charge', auth(), async (req, res) => {
   try {
     const chargeValue = (randomInt(100, 500)/100).toFixed(2)
     const encryptedCard = await Creditcard.findById(creditCard)
-    if (!encryptedCard) {
-      return res.status(404).send()
-    }
-    const cryptCard = new CryptCard({encryptedCard: encryptedCard.hash, user: req.user})
-    const decryptedCard = cryptCard.decrypted
-    let payment
     try {
-      payment = await Payment.pay({
-        amount: {
-          currency: 'BRL',
-          value: chargeValue
-        },
-        cdCard: { securityCode, ...decryptedCard },
-        paymentMethod: {
-          installments: 1,
-          type: 'creditCard'
-        },
-        slip: {},
-        address: {},
-        user: req.user,
+      const payment = await Payment.creditCard({
+        price: Number(chargeValue),
+        verification: true,
+        creditCard, securityCode,
       })
       if (payment.status === 'DECLINED') {
         return res.status(401).send(errors.payment.notAuthorized)
       }
-      await Payment.refund({reference: payment.reference, value: chargeValue * 100})
-      console.log(payment.reference)
+      await Payment.refund({ transactionId: payment.transactionId, price: chargeValue })
     } catch (e) {
-      console.log(e.response)
+      console.log(e)
       return res.status(401).send(errors.payment.notAuthorized)
     }
     encryptedCard.charge = chargeValue
@@ -312,43 +302,38 @@ router.post('/store-card/cancel', auth(), async (req, res) => {
 
 router.get('/credit-card/get', auth(), async (req, res) => {
   try {
-
     //Get unique card
     if (req.query.id) {
       const encryptedCard = await Creditcard.findById(req.query.id)
       if (!encryptedCard) {
         return res.status(404).send(errors.creditCard.notFound)
       }
-      const cryptCard = new CryptCard({encryptedCard: encryptedCard.hash, user: req.user})
-      const decryptedCard = cryptCard.decrypted
-      const brand = getCardBrand(decryptedCard.number.replaceAll(' ', ''))
+      const cryptCard = new CryptCard({ encryptedCard })
+      const decryptedCard = cryptCard.basicDecrypted
       return res.send({
         brand: {
-          name: brand.brand,
-          id: brand.id
+          name: decryptedCard.brand.name,
+          id: decryptedCard.brand.id
         },
         name: encryptedCard.name,
-        verified: encryptedCard.verified,
         id: encryptedCard.id,
-        lastDigits: decryptedCard.number.substring(15, 19)
+        lastDigits: decryptedCard.lastDigits
       })
     }
 
     //Get all cards
-    const encryptedCards = await Creditcard.find({user: req.user.id})
-    const decryptedCards = encryptedCards.map(card => {
-      const cryptCard = new CryptCard({encryptedCard: card.hash, user: req.user})
-      const decryptedCard = cryptCard.decrypted
-      const brand = getCardBrand(decryptedCard.number.replaceAll(' ', ''))
+    const encryptedCards = await Creditcard.find({user: req.user.id, verified: true})
+    const decryptedCards = encryptedCards.map(encryptedCard => {
+      const cryptCard = new CryptCard({ encryptedCard })
+      const decryptedCard = cryptCard.basicDecrypted
       return {
         brand: {
-          name: brand.brand,
-          id: brand.id
+          name: decryptedCard.brand.name,
+          id: decryptedCard.brand.id
         },
-        name: card.name,
-        id: card.id,
-        verified: card.verified,
-        lastDigits: decryptedCard.number.substring(15, 19)
+        name: encryptedCard.name,
+        id: encryptedCard.id,
+        lastDigits: decryptedCard.lastDigits
       }
     })
     return res.send(decryptedCards)
@@ -357,6 +342,7 @@ router.get('/credit-card/get', auth(), async (req, res) => {
     return res.status(500).send(errors.internalServerError)
   }
 })
+
 router.delete('/credit-card/delete', auth(), async (req, res) => {
   try {
     const card = await Creditcard.findById(req.query.id)
