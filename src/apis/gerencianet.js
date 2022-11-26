@@ -3,9 +3,15 @@ const fs = require('fs')
 const path = require('path')
 const https = require('https')
 
-const cert = fs.readFileSync(
-    path.resolve(__dirname, `../../certs/${process.env.GN_CERT}`)
-)
+let cert
+
+try {
+    cert = fs.readFileSync(
+        path.resolve(__dirname, `../../certs/${process.env.GN_CERT}`)
+    )
+} catch (e) {
+    console.log(e)
+}
 
 const agent = new https.Agent({
     pfx: cert,
