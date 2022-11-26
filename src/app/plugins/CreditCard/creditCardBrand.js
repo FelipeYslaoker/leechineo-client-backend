@@ -1,20 +1,20 @@
 const checkers = [
     {
-        brand: 'Amex',
+        name: 'Amex',
         id: 'amex',
         rules: [
             new RegExp('^3[47][0-9]{13}$')
         ]
     },
     {
-        brand: 'Visa',
+        name: 'Visa',
         id: 'visa',
         rules: [
             new RegExp('^4[0-9]{12}(?:[0-9]{3})?$')
         ]
     },
     {
-        brand: 'China Union Pay',
+        name: 'China Union Pay',
         id: 'china_union_pay',
         rules: [
             new RegExp('^62[0-9]{14}[0-9]*$'),
@@ -22,7 +22,7 @@ const checkers = [
         ]
     },
     {
-        brand: 'Mastercard',
+        name: 'Mastercard',
         id: 'mastercard',
         rules: [
             new RegExp('^5[1-5][0-9]{14}$'),
@@ -30,7 +30,7 @@ const checkers = [
         ]
     },
     {
-        brand: 'Discover',
+        name: 'Discover',
         id: 'discover',
         rules: [
             new RegExp('^6011[0-9]{12}[0-9]*$'),
@@ -39,14 +39,14 @@ const checkers = [
         ]
     },
     {
-        brand: 'Dinners',
+        name: 'Dinners',
         id: 'dinners',
         rules: [
             new RegExp('^3[0689][0-9]{12}[0-9]*$'),
         ]
     },
     {
-        brand: 'JBC',
+        name: 'JBC',
         id: 'jbc',
         rules: [
             new RegExp('^35[0-9]{14}[0-9]*$')
@@ -54,13 +54,16 @@ const checkers = [
     }
 ]
 
-const getCardBrand = (card) => {
+const getCardBrand = (number) => {
     const brand = checkers.find(
         checker => checker.rules.find(
-            rule => rule.test(card)
+            rule => rule.test(number.replaceAll(' ', ''))
         )
     )
-    return brand
+    return {
+        id: brand.id,
+        name: brand.name
+    }
 }
 
 module.exports = getCardBrand
