@@ -1,116 +1,113 @@
-const { default: axios } = require("axios")
-const uniqid = require('uniqid')
-const getState = require('../getters/state')
-const authHeaders = {
-    pagSeguro: {
-        'Authorization': process.env.PAG_SEGURO_TOKEN,
-        'Content-Type': 'application/json'
-    }
-}
-
-function getPaymentMethod({ paymentMethod, gateway }) {
-    if (gateway === 'pagSeguro') {
-        switch (paymentMethod) {
-            case 'creditCard':
-                return 'CREDIT_CARD'
-            case 'debitCard':
-                return 'DEBIT_CARD'
-            case 'slip':
-                return 'BOLETO'
-        }
-    }
-}
+const GNRequest = require('../../apis/gerencianet')
+const generateCart = require('./generateCart')
+const User = require("../models/User")
+const Creditcard = require("../models/CreditCard")
+const CryptCard = require("./CreditCard/cryptCard")
+const PagSeguro = require("../../apis/PagSeguro")
 
 class Payment {
-    static async pay({
-        amount: { currency, value },
-        paymentMethod: { installments, capture, type },
-        referenceID, description, softDescriptor,
-        cdCard: { token, number, networToken, expireMonth, expireYear, securityCode, storeCard, holderName },
-        slip: { holder, cpf },
-        webhookURLs, user,
-        address: { zipcode, city, state, district, street, number: housenumber, complement, reference, phone }
-    }) {
+    static async pix({ userId }) {
+        const cart = await generateCart(userId)
+        let price = cart.map(cartItem => cartItem.price.final || cartItem.price.base).reduce((prev, curr) => (prev + curr), 0)
+        const user = await User.findById(userId)
+        const discount = price * 5 / 100
+        const finalPrice = price - discount
+        const chargeData = {
+            calendario: {
+                expiracao: 1800,
+            },
+            devedor: {
+                cpf: user.cpf.replace(/\D/g, ''),
+                nome: `${user.name} ${user.surname}`
+            },
+            valor: {
+                original: `${finalPrice.toFixed(2)}`
+            },
+            chave: 'dcb81236-45a4-4b35-bb63-93c0bdc5533a'
+        }
+        const reqGN = await GNRequest({
+            clientID: process.env.GN_CLIENT_ID,
+            clientSecret: process.env.GN_CLIENT_SECRET
+        });
+        const chargeResponse = await reqGN.post('/v2/cob', chargeData)
+        const qrCodeResponse = await reqGN.get(`/v2/loc/${chargeResponse.data.loc.id}/qrcode`)
+        return {
+            id: chargeResponse.data.txid,
+            code: qrCodeResponse.data.qrcode,
+            qrCode: qrCodeResponse.data.imagemQrcode,
+            price: price,
+            finalPrice: finalPrice.toFixed()
+        }
+    }
 
-        const today = new Date()
-        const dueDate = new Date(today.setDate(today.getDate() + 3)) //TODO Personalizar o vencimento do boleto
-        const dueDay = dueDate.getDate().toString().padStart(2, '0')
-        const dueMonth = (dueDate.getMonth() + 1).toString().padStart(2, '0')
-        const dueYear = dueDate.getFullYear()
+    static async requestPix({ id }) {
+        const reqGN = await GNRequest({
+            clientID: process.env.GN_CLIENT_ID,
+            clientSecret: process.env.GN_CLIENT_SECRET
+        });
+        const pixResponse = reqGN.get(`/v2/cob/${id}`)
+        return {
+            id: pixResponse.data.txid
+        }
+    }
+
+    static async creditCard({ price, installments = 1, creditCard, securityCode, verification }) {
+        const encryptedCard = await Creditcard.findById(creditCard)
+        const decryptedCard = (new CryptCard({ encryptedCard, securityCode })).fullDecrypted
 
         try {
-            const beforeDot = value.toString().split('.')[0]
-            const afterDot = value.toString().split('.')[1]
-            const price = beforeDot + afterDot[0] + afterDot[1]
-
-            const payment = {
-                reference_id: referenceID || uniqid(),
-                description: description || 'Pagamento em Leechineo',
-                amount: {
-                    value: price,
-                    currency
-                },
-                payment_method: {
-                    type: getPaymentMethod({ paymentMethod: type, gateway: 'pagSeguro' }),
-                    capture: capture || false,
-                    installments,
-                    soft_descriptor: softDescriptor,
-                    card: {
-                        number: number?.replaceAll(' ', ''),
-                        exp_month: expireMonth,
-                        exp_year: '20' + expireYear,
-                        security_code: securityCode,
-                        holder: {
-                            name: holderName
-                        }
-                    },
-                    boleto: {
-                        due_date: `${dueYear}-${dueMonth}-${dueDay}`,
-                        holder: {
-                            name: holder,
-                            email: user?.email,
-                            tax_id: cpf?.replaceAll('.', '')?.replace('-', ''),
-                            address: {
-                                street,
-                                number: housenumber,
-                                locality: district,
-                                city,
-                                region_code: state,
-                                postal_code: zipcode?.replace('-', ''),
-                                region: getState(state),
-                                country: 'Brasil'
-                            }
-                        },
-                    },
-                },
-                notification_urls: webhookURLs
-            }
-
-            const response = await axios.post('https://sandbox.api.pagseguro.com/charges', payment, {
-                headers: authHeaders.pagSeguro
+            const payment = await PagSeguro.creditCard({
+                price, installments, verification,
+                creditCard: {
+                    number: decryptedCard.number?.replaceAll(' ', ''),
+                    exp_month: decryptedCard.expireMonth,
+                    exp_year: '20' + decryptedCard.expireYear,
+                    security_code: securityCode,
+                    holder: {
+                        name: decryptedCard.holderName
+                    }
+                }
             })
             return {
-                status: response.data?.status,
-                slipUrl: response.data?.links?.find(link => link.href.includes('pdf'))?.href,
-                slipBarcode: response.data?.payment_method?.boleto?.barcode,
-                formattedSlipBarcode: response.data?.payment_method?.boleto?.formatted_barcode,
-                reference: response.data?.id
+                status: payment.status,
+                transactionId: payment.id
             }
         } catch (e) {
             throw e
         }
     }
-    static async refund({ reference, value }) {
+
+    static async slip({ holderName, holderEmail, holderTaxID, price, address }) {
+        const today = new Date()
+        const dueDate = new Date(today.setDate(today.getDate() + 3)) //TODO Personalizar o vencimento do boleto
+
+        const dueDay = dueDate.getDate().toString().padStart(2, '0')
+        const dueMonth = (dueDate.getMonth() + 1).toString().padStart(2, '0')
+        const dueYear = dueDate.getFullYear()
+
         try {
-            const charge = (await axios.post(`https://sandbox.api.pagseguro.com/charges/${reference}/cancel`, {
-                amount: {
-                    value
-                }
-            }, {
-                headers: authHeaders.pagSeguro
-            })).data
+            const payment = await PagSeguro.slip({
+                dueDate: `${dueYear}-${dueMonth}-${dueDay}`,
+                price, holderName, holderEmail, holderTaxID: holderTaxID.replaceAll('.', '').replaceAll('-', ''),
+                address
+            })
             return {
-                status: charge.status
+                status: payment.status,
+                slipUrl: payment.links?.find(link => link.href.includes('pdf'))?.href,
+                slipBarcode: payment.payment_method?.boleto?.barcode,
+                formattedSlipBarcode: payment.payment_method?.boleto?.formatted_barcode,
+                transactionId: payment.id
+            }
+        } catch (e) {
+            throw e
+        }
+    }
+
+    static async refund({ transactionId, price }) {
+        try {
+            const payment = await PagSeguro.refund({ transactionId, price })
+            return {
+                status: payment.status
             }
         } catch (e) {
             throw e
